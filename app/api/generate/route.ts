@@ -1,22 +1,32 @@
-import OpenAI from "openai"
 import { NextResponse } from "next/server"
+import { getGenerateModel, getOpenAIClient } from "@/lib/llm"
 
 export const runtime = "nodejs"
 
-const PROMPT =
-  "基于用户上传的真实房间照片，生成“奶油风”软装改造后的同角度照片。要求：保留原房间的户型结构、门窗位置、墙体与天花轮廓、地面走向与主要硬装不变；仅替换软装与表面材质的视觉效果（如墙面颜色、窗帘、地毯、沙发、茶几、灯具、装饰画、绿植、抱枕、床品等）。风格：奶油风（奶油白/米白/燕麦/浅驼/浅灰褐），低饱和、柔和、圆润线条、轻盈克制、干净整洁，有层次但不过度堆叠。光线：白天自然光，暖色温，柔和阴影，真实反射与质感。画面：写实摄影风格，真实比例，不夸张广角，不变形；细节清晰，高级但生活化。禁止：卡通/插画风、过度磨皮、强HDR、过锐化、夸张豪华欧式、赛博霓虹、结构改动、出现人物/文字/水印/logo。"
+const PROMPT = `
+基于用户上传的真实房间照片，生成「奶油风」软装改造后的同角度写实照片。
+
+要求：
+1) 保留原房间的户型结构、门窗位置、墙体与天花轮廓、地面走向与主要硬装不变；
+2) 仅替换软装与表面材质的视觉效果（如墙面颜色、窗帘、地毯、沙发、茶几、灯具、装饰画、绿植、抱枕、床品等）；
+3) 风格为奶油风：奶油白/米白/燕麦/浅驼/浅灰暖色，低饱和、柔和、圆润线条，轻盈克制，干净整洁，有层次但不过度堆叠；
+4) 光线：白天自然光，暖色温，柔和阴影，真实反射与质感；
+5) 画面：写实摄影风格，真实比例，不夸张广角，不变形；细节清晰，高级但生活化；
+
+禁止：
+- 卡通/插画风、过度磨皮、强 HDR、过锐化、夸张豪华欧式、赛博霓虹
+- 改动结构
+- 出现人物、文字、水印、logo
+`.trim()
 
 function extractFirstImageUrl(message: unknown): string | null {
   if (!message || typeof message !== "object") return null
 
-  // OpenRouter image generation returns images on message.images
+  // Some OpenAI-compatible providers return images on message.images.
   const images = (message as any).images as unknown
   if (Array.isArray(images) && images.length > 0) {
     const first = images[0] as any
-    const url =
-      first?.image_url?.url ||
-      first?.imageUrl?.url || // some SDKs camelCase this field
-      first?.url
+    const url = first?.image_url?.url || first?.imageUrl?.url || first?.url
     if (typeof url === "string" && url.length > 0) return url
   }
 
@@ -42,19 +52,13 @@ function extractFirstImageUrl(message: unknown): string | null {
 }
 
 export async function POST(request: Request) {
-  const apiKey = process.env.OPENROUTER_API_KEY
-  if (!apiKey) {
-    return NextResponse.json({ error: "缺少 OPENROUTER_API_KEY（请在 .env.local 里配置）" }, { status: 500 })
+  let openai: ReturnType<typeof getOpenAIClient>
+  try {
+    openai = getOpenAIClient()
+  } catch (err: any) {
+    const message = typeof err?.message === "string" ? err.message : "缺少 LLM 配置"
+    return NextResponse.json({ error: message }, { status: 500 })
   }
-
-  const openai = new OpenAI({
-    baseURL: "https://openrouter.ai/api/v1",
-    apiKey,
-    defaultHeaders: {
-      "HTTP-Referer": process.env.OPENROUTER_SITE_URL || "http://localhost:3000",
-      "X-Title": process.env.OPENROUTER_SITE_TITLE || "Soft Furnish AI",
-    },
-  })
 
   try {
     const form = await request.formData()
@@ -69,10 +73,10 @@ export async function POST(request: Request) {
     const base64 = Buffer.from(arrayBuffer).toString("base64")
     const dataUrl = `data:${mime};base64,${base64}`
 
-    // OpenRouter supports `modalities`/`image_config` for Gemini image models,
-    // but the OpenAI SDK types don't include them yet.
+    // Some Gemini image models (via OpenAI-compatible gateways) accept modalities/image_config.
+    // The OpenAI SDK types don't include them yet, so we keep this payload typed as any.
     const payload: any = {
-      model: "google/gemini-2.5-flash-image",
+      model: getGenerateModel(),
       modalities: ["image", "text"],
       image_config: {
         aspect_ratio: "4:3",
@@ -90,7 +94,6 @@ export async function POST(request: Request) {
     }
 
     const completion = await openai.chat.completions.create(payload)
-
     const message = completion.choices?.[0]?.message
     const imageUrl = extractFirstImageUrl(message)
 

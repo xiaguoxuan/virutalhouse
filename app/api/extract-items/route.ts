@@ -1,5 +1,5 @@
-import OpenAI from "openai"
 import { NextResponse } from "next/server"
+import { getExtractModel, getOpenAIClient } from "@/lib/llm"
 import { z } from "zod"
 
 export const runtime = "nodejs"
@@ -84,9 +84,8 @@ function parseItemsFromText(raw: string): unknown {
 }
 
 const PROMPT = `
-你是软装清单生成器。请根据图片内容，输出一个 JSON 数组（不要输出任何解释、不要 Markdown、不要代码块）。
-
-每个元素结构必须严格为：
+你是软装清单生成器。请根据图片内容，输出一个 JSON 数组（不要输出任何解释，不要 Markdown，不要代码块）。
+每个元素必须严格为：
 {
   "category": "sofa_cover|rug|coffee_table|side_table|ceiling_light|floor_lamp|curtain|wall_art|pillows_throw|decor_plants",
   "title": string,
@@ -97,25 +96,19 @@ const PROMPT = `
 
 要求：
 1) 必须输出至少 8 个 item，尽量覆盖 10 个 category。
-2) search_terms 是“可用于搜索的中文关键词串”，不是链接；尽量包含：风格词(奶油风/法式奶油风)、核心品类、颜色/材质/尺寸等。
-3) 不要编造品牌型号；不确定就用通用描述。
+2) search_terms 是“可用于搜索的中文关键词串”，不是链接；尽量包含：风格词（奶油风/法式奶油风等）、核心品类、颜色、材质、尺寸等。
+3) 不要编造品牌/型号；不确定就用通用描述。
 4) 全部用中文。
 `.trim()
 
 export async function POST(request: Request) {
-  const apiKey = process.env.OPENROUTER_API_KEY
-  if (!apiKey) {
-    return NextResponse.json({ error: "缺少 OPENROUTER_API_KEY（请在 .env.local 里配置）" }, { status: 500 })
+  let openai: ReturnType<typeof getOpenAIClient>
+  try {
+    openai = getOpenAIClient()
+  } catch (err: any) {
+    const message = typeof err?.message === "string" ? err.message : "缺少 LLM 配置"
+    return NextResponse.json({ error: message }, { status: 500 })
   }
-
-  const openai = new OpenAI({
-    baseURL: "https://openrouter.ai/api/v1",
-    apiKey,
-    defaultHeaders: {
-      "HTTP-Referer": process.env.OPENROUTER_SITE_URL || "http://localhost:3000",
-      "X-Title": process.env.OPENROUTER_SITE_TITLE || "Soft Furnish AI",
-    },
-  })
 
   try {
     const body = (await request.json().catch(() => null)) as null | { imageUrl?: string }
@@ -126,7 +119,7 @@ export async function POST(request: Request) {
     }
 
     const payload: any = {
-      model: "google/gemini-2.5-flash-image",
+      model: getExtractModel(),
       messages: [
         {
           role: "user",
@@ -156,7 +149,7 @@ export async function POST(request: Request) {
 
     // Ask the model to repair to the exact schema (JSON only)
     const repairPayload: any = {
-      model: "google/gemini-2.5-flash-image",
+      model: getExtractModel(),
       messages: [
         {
           role: "user",
@@ -202,4 +195,3 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }
-
