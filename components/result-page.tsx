@@ -115,7 +115,7 @@ export default function ResultPage({ originalImage, generatedImage, items, onRes
         <div className="space-y-3">
           {items.map((item, index) => (
             <ItemCard
-              key={item.category}
+              key={`${item.category}-${index}`}
               item={item}
               index={index}
               isExpanded={expandedIndex === index}
