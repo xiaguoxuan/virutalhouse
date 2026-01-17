@@ -16,6 +16,17 @@ export default function App() {
   const [generatedImage, setGeneratedImage] = useState<string | null>(null)
   const [items, setItems] = useState<SoftItem[] | null>(null)
 
+  const safeReadJson = async (res: Response) => {
+    const text = await res.text()
+    if (!text) return { json: null as any, text: "" }
+
+    try {
+      return { json: JSON.parse(text) as any, text }
+    } catch {
+      return { json: null as any, text }
+    }
+  }
+
   const handleImageUpload = (file: File, previewUrl: string) => {
     if (uploadedImage) URL.revokeObjectURL(uploadedImage)
     setUploadedFile(file)
@@ -38,10 +49,13 @@ export default function App() {
         method: "POST",
         body: formData,
       })
-      const data = await res.json()
+      const { json: data, text: raw } = await safeReadJson(res)
 
       if (!res.ok) {
-        throw new Error(data?.error || "生成失败")
+        throw new Error(data?.error || raw || "生成失败")
+      }
+      if (!data || typeof data.imageUrl !== "string") {
+        throw new Error(raw || "生成失败（返回不是合法 JSON）")
       }
 
       setGeneratedImage(data.imageUrl)
@@ -52,9 +66,12 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ imageUrl: data.imageUrl }),
       })
-      const itemsData = await itemsRes.json()
+      const { json: itemsData, text: itemsRaw } = await safeReadJson(itemsRes)
       if (!itemsRes.ok) {
-        throw new Error(itemsData?.error || "软装清单生成失败")
+        throw new Error(itemsData?.error || itemsRaw || "软装清单生成失败")
+      }
+      if (!itemsData || !Array.isArray(itemsData.items)) {
+        throw new Error(itemsRaw || "软装清单生成失败（返回不是合法 JSON）")
       }
       setItems(itemsData.items)
       setCurrentPage("result")
